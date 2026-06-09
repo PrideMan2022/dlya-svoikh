@@ -1385,8 +1385,13 @@ function doRegister(){
 /* ── LOGOUT ── */
 function doLogout(){
   clearSession();
+  localStorage.removeItem('ds_token');   // удалить серверный токен
+  if (typeof socket !== 'undefined' && socket) { try{ socket.disconnect(); }catch(e){} }
+  if (typeof authToken !== 'undefined') authToken = null;
   currentUser  = null;
   currentChatId = null;
+  // очистить чаты в памяти
+  for (const k of Object.keys(CHAT_DATA)) delete CHAT_DATA[k];
   document.getElementById('mainScreen').classList.remove('active');
   document.getElementById('authScreen').classList.add('active');
   document.getElementById('loginUsername').value='';
@@ -1443,14 +1448,28 @@ function launchApp(user){
   showToast('Привет, '+user.name+'! 👋');
 }
 
-/* auto-login on page load */
+/* auto-login on page load — единый надёжный автовход */
 window.addEventListener('DOMContentLoaded', ()=>{
   renderUsersHint();
   const session = loadSession();
-  if(session){
+  const token   = localStorage.getItem('ds_token');
+
+  if (session) {
+    // 1. Серверный пользователь (есть токен) — входим сразу
+    if (token) {
+      authToken = token;
+      launchApp(session);
+      if (typeof connectToServer === 'function') {
+        connectToServer(token);
+      }
+      return;
+    }
+    // 2. Локальный пользователь (без сервера)
     const users = loadUsers();
     const u = users[session.username];
-    if(u){ launchApp(u); return; }
+    if (u) { launchApp(u); return; }
+    // 3. Сессия есть, но юзер не найден локально — всё равно входим
+    launchApp(session);
   }
 });
 
@@ -2636,16 +2655,9 @@ window.doRegister = async function() {
   }
 };
 
-// ── Автовход с токеном ──
-window.addEventListener('DOMContentLoaded', () => {
-  const token = localStorage.getItem('ds_token');
-  const session = loadSession();
-  if (token && session) {
-    authToken = token;
-    launchApp(session);
-    connectToServer(token);
-  }
-});
+// ── Автовход обрабатывается единым обработчиком выше ──
+// (см. auto-login on page load — он подключается к серверу если есть токен)
+
 </script>
 
 </body>
