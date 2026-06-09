@@ -741,6 +741,89 @@ body::after{width:clamp(240px,45vw,480px);height:clamp(240px,45vw,480px);backgro
 .people-empty-icon{font-size:40px;opacity:.3;}
 .people-empty-text{font-size:14px;color:var(--text-secondary);}
 
+
+/* ══ TELEGRAM-STYLE CONTACTS ══ */
+.tg-actions{padding:4px 8px;}
+.tg-action-item{
+  display:flex;align-items:center;gap:14px;
+  padding:12px 10px;border-radius:var(--r-lg);
+  cursor:pointer;transition:background .15s;
+}
+.tg-action-item:hover{background:rgba(255,255,255,.55);}
+.tg-action-icon{
+  width:42px;height:42px;border-radius:50%;
+  display:flex;align-items:center;justify-content:center;
+  font-size:19px;color:white;flex-shrink:0;
+}
+.tg-action-icon.invite{background:linear-gradient(135deg,#4a9eff,#2196f3);}
+.tg-action-icon.contacts{background:linear-gradient(135deg,#43e97b,#2ecc71);}
+.tg-action-icon.nearby{background:linear-gradient(135deg,#fa709a,#e74c3c);}
+.tg-action-label{font-size:15px;font-weight:500;color:var(--accent);}
+
+.tg-divider{height:8px;background:rgba(74,158,255,.04);border-top:1px solid rgba(255,255,255,.35);border-bottom:1px solid rgba(255,255,255,.35);margin:4px 0;}
+
+/* invite sheet */
+.invite-sheet-content{text-align:center;padding:8px 0 4px;}
+.invite-qr-wrap{
+  width:160px;height:160px;margin:0 auto 16px;
+  background:white;border-radius:var(--r-lg);
+  display:flex;align-items:center;justify-content:center;
+  box-shadow:0 4px 20px rgba(74,158,255,.15);
+  font-size:64px;
+}
+.invite-link-box{
+  display:flex;align-items:center;gap:8px;
+  background:rgba(255,255,255,.6);
+  border:1.5px solid rgba(255,255,255,.75);
+  border-radius:var(--r-md);
+  padding:11px 14px;margin-bottom:12px;
+}
+.invite-link-text{
+  flex:1;font-size:13px;color:var(--accent);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  text-align:left;font-family:monospace;
+}
+.invite-copy-btn{
+  background:none;border:none;cursor:pointer;font-size:18px;
+  flex-shrink:0;padding:2px;
+}
+.invite-share-row{display:flex;gap:10px;}
+.invite-share-btn{
+  flex:1;padding:13px;border-radius:var(--r-md);border:none;
+  font-size:14px;font-weight:600;cursor:pointer;
+  font-family:inherit;transition:all .2s;
+  display:flex;align-items:center;justify-content:center;gap:7px;
+}
+.invite-share-btn.primary{background:var(--accent-grad);color:white;box-shadow:0 4px 14px rgba(74,158,255,.3);}
+.invite-share-btn.primary:hover{transform:translateY(-1px);}
+.invite-share-btn.secondary{background:rgba(255,255,255,.55);color:var(--text-primary);}
+
+/* phone contacts list */
+.phone-contact-item{
+  display:flex;align-items:center;gap:12px;
+  padding:10px;border-radius:var(--r-lg);
+  transition:background .15s;
+}
+.phone-contact-item:hover{background:rgba(255,255,255,.5);}
+.phone-contact-ava{
+  width:42px;height:42px;border-radius:50%;
+  background:linear-gradient(135deg,#a18cd1,#fbc2eb);
+  display:flex;align-items:center;justify-content:center;
+  font-size:17px;font-weight:700;color:white;flex-shrink:0;
+}
+.phone-contact-info{flex:1;min-width:0;}
+.phone-contact-name{font-size:14px;font-weight:600;color:var(--text-primary);}
+.phone-contact-phone{font-size:12px;color:var(--text-muted);}
+.phone-invite-btn{
+  padding:7px 14px;border-radius:20px;border:none;
+  background:var(--accent-grad);color:white;
+  font-size:12px;font-weight:600;cursor:pointer;
+  font-family:inherit;flex-shrink:0;transition:all .2s;
+  box-shadow:0 2px 8px rgba(74,158,255,.25);
+}
+.phone-invite-btn:hover{transform:scale(1.05);}
+.phone-invite-btn.sent{background:rgba(46,213,115,.2);color:#1a8a50;box-shadow:none;}
+
 </style>
 </head>
 <body>
@@ -845,6 +928,25 @@ body::after{width:clamp(240px,45vw,480px);height:clamp(240px,45vw,480px);backgro
           oninput="searchPeople(this.value)">
       </div>
       <div style="flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;" id="peopleListWrap">
+        
+        <!-- Telegram-style actions -->
+        <div class="tg-actions">
+          <div class="tg-action-item" onclick="openInviteSheet()">
+            <div class="tg-action-icon invite">🔗</div>
+            <div class="tg-action-label">Пригласить друзей</div>
+          </div>
+          <div class="tg-action-item" onclick="importPhoneContacts()">
+            <div class="tg-action-icon contacts">📱</div>
+            <div class="tg-action-label">Найти из контактов</div>
+          </div>
+        </div>
+        <div class="tg-divider"></div>
+        <div id="phoneContactsSection" style="display:none;">
+          <div class="online-section-title">📱 Контакты из телефона</div>
+          <div id="phoneContactsList" class="people-list"></div>
+          <div class="tg-divider"></div>
+        </div>
+
         <div id="onlineSection">
           <div class="online-section-title">🟢 Онлайн</div>
           <div id="onlinePeopleList" class="people-list"></div>
@@ -1140,6 +1242,26 @@ body::after{width:clamp(240px,45vw,480px);height:clamp(240px,45vw,480px);backgro
   <div class="ctx-item" onclick="ctxCopy()">📋 Копировать</div>
   <div class="ctx-item" onclick="ctxForward()">↗️ Переслать</div>
   <div class="ctx-item danger" onclick="ctxDelete()">🗑️ Удалить</div>
+</div>
+
+
+<!-- INVITE SHEET -->
+<div class="modal-overlay" id="inviteModal">
+  <div class="modal-card">
+    <div class="modal-title">🔗 Пригласить в «Для своих»</div>
+    <div class="modal-sub">Отправь другу ссылку — он зарегистрируется и вы сможете переписываться</div>
+    <div class="invite-sheet-content">
+      <div class="invite-qr-wrap">💬</div>
+      <div class="invite-link-box">
+        <div class="invite-link-text" id="inviteLinkText">https://prideman2022.github.io/dlya-svoikh</div>
+        <button class="invite-copy-btn" onclick="copyInviteLink()">📋</button>
+      </div>
+      <div class="invite-share-row">
+        <button class="invite-share-btn primary" onclick="shareInviteLink()">📤 Поделиться</button>
+        <button class="invite-share-btn secondary" onclick="closeModal('inviteModal')">Закрыть</button>
+      </div>
+    </div>
+  </div>
 </div>
 
 <!-- TOAST -->
@@ -2147,6 +2269,89 @@ window.addEventListener('resize',()=>{
 }
 .people-empty-icon{font-size:40px;opacity:.3;}
 .people-empty-text{font-size:14px;color:var(--text-secondary);}
+
+
+/* ══ TELEGRAM-STYLE CONTACTS ══ */
+.tg-actions{padding:4px 8px;}
+.tg-action-item{
+  display:flex;align-items:center;gap:14px;
+  padding:12px 10px;border-radius:var(--r-lg);
+  cursor:pointer;transition:background .15s;
+}
+.tg-action-item:hover{background:rgba(255,255,255,.55);}
+.tg-action-icon{
+  width:42px;height:42px;border-radius:50%;
+  display:flex;align-items:center;justify-content:center;
+  font-size:19px;color:white;flex-shrink:0;
+}
+.tg-action-icon.invite{background:linear-gradient(135deg,#4a9eff,#2196f3);}
+.tg-action-icon.contacts{background:linear-gradient(135deg,#43e97b,#2ecc71);}
+.tg-action-icon.nearby{background:linear-gradient(135deg,#fa709a,#e74c3c);}
+.tg-action-label{font-size:15px;font-weight:500;color:var(--accent);}
+
+.tg-divider{height:8px;background:rgba(74,158,255,.04);border-top:1px solid rgba(255,255,255,.35);border-bottom:1px solid rgba(255,255,255,.35);margin:4px 0;}
+
+/* invite sheet */
+.invite-sheet-content{text-align:center;padding:8px 0 4px;}
+.invite-qr-wrap{
+  width:160px;height:160px;margin:0 auto 16px;
+  background:white;border-radius:var(--r-lg);
+  display:flex;align-items:center;justify-content:center;
+  box-shadow:0 4px 20px rgba(74,158,255,.15);
+  font-size:64px;
+}
+.invite-link-box{
+  display:flex;align-items:center;gap:8px;
+  background:rgba(255,255,255,.6);
+  border:1.5px solid rgba(255,255,255,.75);
+  border-radius:var(--r-md);
+  padding:11px 14px;margin-bottom:12px;
+}
+.invite-link-text{
+  flex:1;font-size:13px;color:var(--accent);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  text-align:left;font-family:monospace;
+}
+.invite-copy-btn{
+  background:none;border:none;cursor:pointer;font-size:18px;
+  flex-shrink:0;padding:2px;
+}
+.invite-share-row{display:flex;gap:10px;}
+.invite-share-btn{
+  flex:1;padding:13px;border-radius:var(--r-md);border:none;
+  font-size:14px;font-weight:600;cursor:pointer;
+  font-family:inherit;transition:all .2s;
+  display:flex;align-items:center;justify-content:center;gap:7px;
+}
+.invite-share-btn.primary{background:var(--accent-grad);color:white;box-shadow:0 4px 14px rgba(74,158,255,.3);}
+.invite-share-btn.primary:hover{transform:translateY(-1px);}
+.invite-share-btn.secondary{background:rgba(255,255,255,.55);color:var(--text-primary);}
+
+/* phone contacts list */
+.phone-contact-item{
+  display:flex;align-items:center;gap:12px;
+  padding:10px;border-radius:var(--r-lg);
+  transition:background .15s;
+}
+.phone-contact-item:hover{background:rgba(255,255,255,.5);}
+.phone-contact-ava{
+  width:42px;height:42px;border-radius:50%;
+  background:linear-gradient(135deg,#a18cd1,#fbc2eb);
+  display:flex;align-items:center;justify-content:center;
+  font-size:17px;font-weight:700;color:white;flex-shrink:0;
+}
+.phone-contact-info{flex:1;min-width:0;}
+.phone-contact-name{font-size:14px;font-weight:600;color:var(--text-primary);}
+.phone-contact-phone{font-size:12px;color:var(--text-muted);}
+.phone-invite-btn{
+  padding:7px 14px;border-radius:20px;border:none;
+  background:var(--accent-grad);color:white;
+  font-size:12px;font-weight:600;cursor:pointer;
+  font-family:inherit;flex-shrink:0;transition:all .2s;
+  box-shadow:0 2px 8px rgba(74,158,255,.25);
+}
+.phone-invite-btn:hover{transform:scale(1.05);}
+.phone-invite-btn.sent{background:rgba(46,213,115,.2);color:#1a8a50;box-shadow:none;}
 
 </style>
 
