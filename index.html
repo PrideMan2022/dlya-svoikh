@@ -2013,5 +2013,296 @@ window.addEventListener('resize',()=>{
 
 
 
+
+<script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+<script>
+// ════════════════════════════════════════════
+//  СЕРВЕР — реальное подключение
+// ════════════════════════════════════════════
+const SERVER_URL = 'https://dlya-svoikh-server.onrender.com';
+let socket = null;
+let authToken = null;
+
+// ── Подключение к серверу ──
+function connectToServer(token) {
+  authToken = token;
+  socket = io(SERVER_URL, {
+    auth: { token },
+    transports: ['websocket', 'polling'],
+    reconnection: true,
+    reconnectionDelay: 2000,
+  });
+
+  socket.on('connect', () => {
+    console.log('🟢 Подключён к серверу');
+    showToast('🟢 Подключён к серверу');
+    loadChatsFromServer();
+  });
+
+  socket.on('disconnect', () => {
+    console.log('🔴 Отключён от сервера');
+  });
+
+  socket.on('connect_error', (e) => {
+    console.log('Ошибка подключения:', e.message);
+  });
+
+  // Новое сообщение
+  socket.on('message:new', (msg) => {
+    const cid = msg.chat_id;
+    if (!CHAT_DATA[cid]) return;
+    CHAT_DATA[cid].msgs.push(serverMsgToLocal(msg));
+    if (currentChatId == cid) {
+      renderMessages();
+    } else {
+      CHAT_DATA[cid].unread = (CHAT_DATA[cid].unread || 0) + 1;
+    }
+    renderChatsList();
+  });
+
+  // Печатает
+  socket.on('typing:start', ({ user_id, chat_id }) => {
+    if (currentChatId == chat_id) showTyping();
+  });
+
+  // Онлайн статус
+  socket.on('user:online',  ({ user_id }) => updateOnlineStatus(user_id, true));
+  socket.on('user:offline', ({ user_id }) => updateOnlineStatus(user_id, false));
+
+  // Реакция
+  socket.on('message:reacted', ({ msg_id, reactions }) => {
+    if (!currentChatId) return;
+    const msg = CHAT_DATA[currentChatId]?.msgs.find(m => m.id == msg_id);
+    if (msg) { msg.rx = reactions.map(r => r.emoji); renderMessages(); }
+  });
+
+  // Удаление
+  socket.on('message:deleted', ({ msg_id, chat_id }) => {
+    if (CHAT_DATA[chat_id]) {
+      CHAT_DATA[chat_id].msgs = CHAT_DATA[chat_id].msgs.filter(m => m.id != msg_id);
+      if (currentChatId == chat_id) renderMessages();
+      renderChatsList();
+    }
+  });
+}
+
+function updateOnlineStatus(userId, isOnline) {
+  for (const c of Object.values(CHAT_DATA)) {
+    if (c.otherId == userId) { c.online = isOnline; }
+  }
+  renderChatsList();
+}
+
+function serverMsgToLocal(msg) {
+  return {
+    id:      msg.id,
+    out:     currentUser && msg.user_id == currentUser.serverId,
+    type:    msg.type || 'text',
+    text:    msg.content || '',
+    src:     msg.file_url || '',
+    dur:     msg.duration || '',
+    sticker: msg.content || '',
+    t:       new Date(msg.created_at).getTime(),
+    rx:      (msg.reactions || []).map(r => r.emoji || r),
+    st:      msg.status === 'read' ? '✓✓' : '✓',
+    secret:  msg.is_secret,
+  };
+}
+
+// ── API запросы ──
+async function apiRequest(method, path, body) {
+  const resp = await fetch(SERVER_URL + path, {
+    method,
+    headers: {
+      'Content-Type': 'application/json',
+      ...(authToken ? { 'Authorization': 'Bearer ' + authToken } : {}),
+    },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  return resp.json();
+}
+
+// ── Загрузить чаты с сервера ──
+async function loadChatsFromServer() {
+  try {
+    const chats = await apiRequest('GET', '/api/chats');
+    if (!Array.isArray(chats)) return;
+    chats.forEach(c => {
+      const id = c.id;
+      const av = c.type === 'group' ? (c.name||'Г')[0].toUpperCase() : (c.other_name||'?')[0].toUpperCase();
+      const colors = ['#4a9eff,#a78bfa','#f093fb,#f5576c','#43e97b,#38f9d7','#fa709a,#fee140','#00d2b8,#00a896'];
+      const clr = colors[id % colors.length];
+      CHAT_DATA[id] = {
+        name:    c.type === 'group' ? c.name : c.other_name,
+        av,
+        clr,
+        secret:  c.type === 'secret',
+        online:  c.other_online === 'online',
+        msgs:    [],
+        unread:  parseInt(c.unread) || 0,
+        otherId: c.other_id,
+        serverId: id,
+      };
+    });
+    renderChatsList();
+  } catch(e) {
+    console.log('Chats load error:', e);
+  }
+}
+
+// ── Загрузить сообщения чата ──
+async function loadMessagesFromServer(chatId) {
+  try {
+    const msgs = await apiRequest('GET', '/api/chats/' + chatId + '/messages');
+    if (!Array.isArray(msgs)) return;
+    CHAT_DATA[chatId].msgs = msgs.map(m => ({
+      ...serverMsgToLocal(m),
+      out: m.user_id == currentUser?.serverId,
+    }));
+    renderMessages();
+  } catch(e) {
+    console.log('Messages load error:', e);
+  }
+}
+
+// ── Перехват отправки сообщения ──
+const _origSendMessage = sendMessage;
+window.sendMessage = function() {
+  if (!socket || !socket.connected) { _origSendMessage(); return; }
+  const inp = document.getElementById('msgInput');
+  const text = inp.value.trim();
+  if (!text && !pendingFile) return;
+  if (!currentChatId) return;
+  dismissAiWarn();
+
+  if (pendingFile) {
+    // Файл — сначала загружаем на сервер
+    uploadFileToServer(pendingFile.url, pendingFile.isVideo);
+    pendingFile = null;
+    document.getElementById('filePreview').classList.remove('show');
+  }
+
+  if (text) {
+    socket.emit('message:send', {
+      chat_id: currentChatId,
+      type: 'text',
+      content: text,
+      is_secret: CHAT_DATA[currentChatId]?.secret || false,
+    }, (res) => {
+      if (res?.error) showToast('Ошибка: ' + res.error);
+    });
+    inp.value = ''; autoResize(inp);
+  }
+};
+
+async function uploadFileToServer(url, isVideo) {
+  try {
+    const resp = await fetch(url);
+    const blob = await resp.blob();
+    const fd = new FormData();
+    fd.append('file', blob, isVideo ? 'video.mp4' : 'photo.jpg');
+    const r = await fetch(SERVER_URL + '/api/upload', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + authToken },
+      body: fd,
+    });
+    const data = await r.json();
+    if (data.url && socket) {
+      socket.emit('message:send', {
+        chat_id: currentChatId,
+        type: data.type || 'image',
+        file_url: data.url,
+        is_secret: CHAT_DATA[currentChatId]?.secret || false,
+      });
+    }
+  } catch(e) { console.log('Upload error:', e); }
+}
+
+// ── Перехват открытия чата ──
+const _origOpenChat = openChat;
+window.openChat = function(id) {
+  _origOpenChat(id);
+  if (socket && socket.connected && CHAT_DATA[id]) {
+    loadMessagesFromServer(id);
+  }
+};
+
+// ── Typing indicator ──
+let typingTimer = null;
+document.addEventListener('DOMContentLoaded', () => {
+  const inp = document.getElementById('msgInput');
+  if (inp) {
+    inp.addEventListener('input', () => {
+      if (socket && currentChatId) {
+        socket.emit('typing:start', { chat_id: currentChatId });
+        clearTimeout(typingTimer);
+        typingTimer = setTimeout(() => {
+          socket.emit('typing:stop', { chat_id: currentChatId });
+        }, 2000);
+      }
+    });
+  }
+});
+
+// ── Перехват логина/регистрации ──
+const _origDoLogin = doLogin;
+window.doLogin = async function() {
+  const username = document.getElementById('loginUsername').value.trim();
+  const password = document.getElementById('loginPassword').value;
+  if (!username || !password) { showAuthError('loginError', 'Заполните все поля'); return; }
+
+  try {
+    const data = await apiRequest('POST', '/api/login', { username, password });
+    if (data.error) { showAuthError('loginError', data.error); return; }
+    data.user.serverId = data.user.id;
+    saveSession(data.user);
+    authToken = data.token;
+    localStorage.setItem('ds_token', data.token);
+    launchApp(data.user);
+    connectToServer(data.token);
+  } catch(e) {
+    // Если сервер недоступен — локальный вход
+    _origDoLogin();
+  }
+};
+
+const _origDoRegister = doRegister;
+window.doRegister = async function() {
+  const name     = document.getElementById('regName').value.trim();
+  const username = document.getElementById('regUsername').value.trim();
+  const phone    = document.getElementById('regPhone').value.trim();
+  const pass     = document.getElementById('regPassword').value;
+  const pass2    = document.getElementById('regPassword2').value;
+
+  if (!name || !username || !pass) { showAuthError('regError', 'Заполните все поля'); return; }
+  if (pass !== pass2) { showAuthError('regError', 'Пароли не совпадают'); return; }
+  if (pass.length < 6) { showAuthError('regError', 'Пароль минимум 6 символов'); return; }
+
+  try {
+    const data = await apiRequest('POST', '/api/register', { name, username, phone, password: pass });
+    if (data.error) { showAuthError('regError', data.error); return; }
+    data.user.serverId = data.user.id;
+    showAuthSuccess('regSuccess', '✅ Аккаунт создан! Входим…');
+    saveSession(data.user);
+    authToken = data.token;
+    localStorage.setItem('ds_token', data.token);
+    setTimeout(() => { launchApp(data.user); connectToServer(data.token); }, 1000);
+  } catch(e) {
+    _origDoRegister();
+  }
+};
+
+// ── Автовход с токеном ──
+window.addEventListener('DOMContentLoaded', () => {
+  const token = localStorage.getItem('ds_token');
+  const session = loadSession();
+  if (token && session) {
+    authToken = token;
+    launchApp(session);
+    connectToServer(token);
+  }
+});
+</script>
+
 </body>
 </html>
