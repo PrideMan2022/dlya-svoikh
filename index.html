@@ -2234,11 +2234,12 @@ let searchTimer = null;
 function showPeoplePanel() {
   document.getElementById('chatsList').style.display = 'none';
   document.getElementById('peoplePanel').style.display = 'flex';
-  loadOnlinePeople();
+  startPeopleRefresh();
 }
 function hidePeoplePanel() {
   document.getElementById('chatsList').style.display = '';
   document.getElementById('peoplePanel').style.display = 'none';
+  stopPeopleRefresh();
 }
 
 async function loadOnlinePeople() {
@@ -2253,6 +2254,21 @@ async function loadOnlinePeople() {
   } catch(e) {
     renderOnlinePeople([]);
   }
+}
+
+// Автообновление каждые 10 секунд пока вкладка "Люди" активна
+let peopleRefreshTimer = null;
+
+function startPeopleRefresh() {
+  stopPeopleRefresh();
+  loadOnlinePeople();
+  peopleRefreshTimer = setInterval(() => {
+    if (currentTab === 'people') loadOnlinePeople();
+  }, 10000);
+}
+
+function stopPeopleRefresh() {
+  if (peopleRefreshTimer) { clearInterval(peopleRefreshTimer); peopleRefreshTimer = null; }
 }
 
 function renderOnlinePeople(users) {
@@ -2645,9 +2661,29 @@ function connectToServer(token) {
     if (currentChatId == chat_id) showTyping();
   });
 
-  // Онлайн статус
-  socket.on('user:online',  ({ user_id }) => updateOnlineStatus(user_id, true));
-  socket.on('user:offline', ({ user_id }) => updateOnlineStatus(user_id, false));
+  // Новый пользователь зарегистрировался
+  socket.on('user:new', (newUser) => {
+    if (!onlineUsersList.find(u => u.id == newUser.id)) {
+      onlineUsersList.unshift({ ...newUser, online_status: 'online' });
+      if (currentTab === 'people') renderOnlinePeople(onlineUsersList);
+      showToast(`👋 ${newUser.name} присоединился к «Для своих»!`);
+    }
+  });
+    updateOnlineStatus(user_id, true);
+    // Обновить список людей если открыт
+    if (currentTab === 'people') {
+      const u = onlineUsersList.find(u => u.id == user_id);
+      if (u) { u.online_status = 'online'; renderOnlinePeople(onlineUsersList); }
+      else loadOnlinePeople(); // новый пользователь — перезагрузить список
+    }
+  });
+  socket.on('user:offline', ({ user_id }) => {
+    updateOnlineStatus(user_id, false);
+    if (currentTab === 'people') {
+      const u = onlineUsersList.find(u => u.id == user_id);
+      if (u) { u.online_status = 'offline'; renderOnlinePeople(onlineUsersList); }
+    }
+  });
 
   // Реакция
   socket.on('message:reacted', ({ msg_id, reactions }) => {
