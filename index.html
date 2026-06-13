@@ -901,9 +901,9 @@ body::after{width:clamp(240px,45vw,480px);height:clamp(240px,45vw,480px);backgro
     </div>
 
     <div class="new-chat-menu" id="newChatMenu">
-      <div class="menu-item" onclick="startNewChat('regular')">💬 Новый чат</div>
-      <div class="menu-item" onclick="startNewChat('group')">👥 Создать группу</div>
-      <div class="menu-item" onclick="startNewChat('secret')">🔒 Секретный чат</div>
+      <div class="menu-item" onclick="goToPeopleTab()">💬 Новый чат</div>
+      <div class="menu-item" onclick="goToPeopleTab()">🔒 Секретный чат</div>
+      <div class="menu-item" onclick="goToPeopleTab(true)">🔗 Пригласить друга</div>
       <div class="menu-item" onclick="openCapsuleModal()">⏳ Временна́я капсула</div>
     </div>
 
@@ -1580,7 +1580,18 @@ function previewMsg(m){
 function filterChats(){renderChatsList(document.getElementById('searchInput').value);}
 function filterTab(el,tab){
   document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));
-  el.classList.add('active'); currentTab=tab; renderChatsList();
+  el.classList.add('active'); currentTab=tab;
+  const pp = document.getElementById('peoplePanel');
+  const cl = document.getElementById('chatsList');
+  if (tab === 'people') {
+    if (cl) cl.style.display = 'none';
+    if (pp) pp.style.display = 'flex';
+    if (typeof loadOnlinePeople === 'function') loadOnlinePeople();
+  } else {
+    if (pp) pp.style.display = 'none';
+    if (cl) cl.style.display = '';
+    renderChatsList();
+  }
 }
 
 /* ════════════════════════════════════════════
@@ -1866,6 +1877,17 @@ function addReactionById(id,r){ if(!currentChatId) return; const msg=CHAT_DATA[c
    NEW CHAT
 ════════════════════════════════════════════ */
 function toggleNewChatMenu(){ document.getElementById('newChatMenu').classList.toggle('show'); }
+
+/* Открыть вкладку Люди (вместо создания фейкового чата) */
+function goToPeopleTab(openInvite){
+  document.getElementById('newChatMenu').classList.remove('show');
+  const peopleBtn = [...document.querySelectorAll('.tab-btn')].find(b => b.textContent.includes('Люди'));
+  if (peopleBtn) filterTab(peopleBtn, 'people');
+  if (openInvite && typeof openInviteSheet === 'function') {
+    setTimeout(() => openInviteSheet(), 300);
+  }
+}
+
 function startNewChat(type){
   document.getElementById('newChatMenu').classList.remove('show');
   const names={regular:'Новый контакт',group:'Новая группа',secret:'Секретный чат'};
@@ -2201,6 +2223,201 @@ document.addEventListener('click',e=>{
 window.addEventListener('resize',()=>{
   if(window.innerWidth>640) document.getElementById('sidebar').classList.remove('slide-out');
 });
+
+/* ════════════════════════════════════════════
+   PEOPLE / CONTACTS
+════════════════════════════════════════════ */
+const APP_URL = 'https://prideman2022.github.io/dlya-svoikh';
+let onlineUsersList = [];
+let searchTimer = null;
+
+function showPeoplePanel() {
+  document.getElementById('chatsList').style.display = 'none';
+  document.getElementById('peoplePanel').style.display = 'flex';
+  loadOnlinePeople();
+}
+function hidePeoplePanel() {
+  document.getElementById('chatsList').style.display = '';
+  document.getElementById('peoplePanel').style.display = 'none';
+}
+
+async function loadOnlinePeople() {
+  if (!authToken) {
+    renderOnlinePeople([]);
+    return;
+  }
+  try {
+    const data = await apiRequest('GET', '/api/users/search?q=');
+    onlineUsersList = Array.isArray(data) ? data : [];
+    renderOnlinePeople(onlineUsersList);
+  } catch(e) {
+    renderOnlinePeople([]);
+  }
+}
+
+function renderOnlinePeople(users) {
+  const list = document.getElementById('onlinePeopleList');
+  const onlineSec = document.getElementById('onlineSection');
+  const emptyEl = document.getElementById('peopleEmpty');
+  if (!list) return;
+
+  if (!users || !users.length) {
+    onlineSec.style.display = 'none';
+    emptyEl.style.display = '';
+    return;
+  }
+
+  onlineSec.style.display = '';
+  emptyEl.style.display = 'none';
+
+  const online  = users.filter(u => u.online_status === 'online');
+  const offline = users.filter(u => u.online_status !== 'online');
+
+  let html = '';
+  if (online.length) html += online.map(u => buildPersonItem(u)).join('');
+  if (offline.length) {
+    html += `<div class="online-section-title" style="margin-top:6px;">👤 Все пользователи</div>`;
+    html += offline.map(u => buildPersonItem(u)).join('');
+  }
+  list.innerHTML = html;
+}
+
+function buildPersonItem(u) {
+  const isOnline = u.online_status === 'online';
+  const av = u.avatar_emoji || (u.name||'?')[0].toUpperCase();
+  const avatarHtml = u.avatar_img
+    ? `<img src="${u.avatar_img}" alt="">`
+    : av;
+  const today = u.today_status ? ' · ' + esc(u.today_status) : '';
+  return `
+    <div class="people-item" onclick="startChatWithUser(${u.id},'${esc(u.name||'')}','${esc(u.username||'')}')">
+      <div class="people-avatar">${avatarHtml}${isOnline?'<div class="online-dot"></div>':''}</div>
+      <div class="people-info">
+        <div class="people-name">${esc(u.name||'')}</div>
+        <div class="people-tag">@${esc(u.username||'')}</div>
+        <div class="people-status ${isOnline?'online':'offline'}">${isOnline?'● В сети':'○ Не в сети'}${today}</div>
+      </div>
+      <button class="people-msg-btn" onclick="event.stopPropagation();startChatWithUser(${u.id},'${esc(u.name||'')}','${esc(u.username||'')}')">💬</button>
+    </div>`;
+}
+
+function searchPeople(query) {
+  clearTimeout(searchTimer);
+  const searchSec = document.getElementById('searchSection');
+  const onlineSec = document.getElementById('onlineSection');
+  const emptyEl   = document.getElementById('peopleEmpty');
+  if (!query.trim()) {
+    searchSec.style.display = 'none';
+    onlineSec.style.display = '';
+    emptyEl.style.display = 'none';
+    renderOnlinePeople(onlineUsersList);
+    return;
+  }
+  searchTimer = setTimeout(async () => {
+    try {
+      const data = await apiRequest('GET', '/api/users/search?q=' + encodeURIComponent(query));
+      searchSec.style.display = '';
+      onlineSec.style.display = 'none';
+      if (!Array.isArray(data) || !data.length) {
+        document.getElementById('searchPeopleList').innerHTML = '';
+        emptyEl.style.display = '';
+        return;
+      }
+      emptyEl.style.display = 'none';
+      document.getElementById('searchPeopleList').innerHTML = data.map(u => buildPersonItem(u)).join('');
+    } catch(e) { console.log('Search error:', e); }
+  }, 400);
+}
+
+async function startChatWithUser(userId, name, username) {
+  if (!authToken) { showToast('Войдите в аккаунт'); return; }
+  try {
+    showToast('Открываю чат…');
+    const data = await apiRequest('POST', '/api/chats/direct', { target_user_id: userId });
+    if (data.chat_id) {
+      if (!CHAT_DATA[data.chat_id]) {
+        const colors = ['#4a9eff,#a78bfa','#f093fb,#f5576c','#43e97b,#38f9d7','#fa709a,#fee140'];
+        CHAT_DATA[data.chat_id] = {
+          name, av: (name||'?')[0].toUpperCase(),
+          clr: colors[userId % colors.length],
+          secret: false, online: true,
+          msgs: [], unread: 0, otherId: userId,
+        };
+      }
+      hidePeoplePanel();
+      document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));
+      document.querySelector('.tab-btn')?.classList.add('active');
+      currentTab = 'all';
+      renderChatsList();
+      openChat(data.chat_id);
+    }
+  } catch(e) { showToast('Ошибка создания чата'); }
+}
+
+/* ── Приглашения ── */
+function getInviteText() {
+  const name = currentUser?.name || 'Друг';
+  return `${name} приглашает тебя в «Для своих» 💬\nРегистрируйся: ${APP_URL}`;
+}
+function openInviteSheet() {
+  document.getElementById('newChatMenu').classList.remove('show');
+  document.getElementById('inviteModal').classList.add('show');
+}
+function copyInviteLink() {
+  navigator.clipboard?.writeText(getInviteText())
+    .then(()=>showToast('📋 Скопировано!'))
+    .catch(()=>showToast('📋 Скопировано!'));
+}
+async function shareInviteLink() {
+  if (navigator.share) {
+    try {
+      await navigator.share({ title:'Для своих', text:getInviteText(), url:APP_URL });
+      showToast('✅ Приглашение отправлено!');
+      closeModal('inviteModal');
+    } catch(e) { if(e.name!=='AbortError') copyInviteLink(); }
+  } else { copyInviteLink(); }
+}
+
+/* ── Контакты телефона ── */
+async function importPhoneContacts() {
+  if ('contacts' in navigator && 'select' in navigator.contacts) {
+    try {
+      const contacts = await navigator.contacts.select(['name','tel'],{multiple:true});
+      if (contacts.length) { renderPhoneContacts(contacts); showToast(`📱 Выбрано: ${contacts.length}`); }
+    } catch(e) { if(e.name!=='AbortError') showToast('Не удалось открыть контакты'); }
+  } else {
+    showToast('📱 На iPhone — поделись через «Пригласить друзей»');
+    setTimeout(()=>openInviteSheet(), 1200);
+  }
+}
+function renderPhoneContacts(contacts) {
+  const section = document.getElementById('phoneContactsSection');
+  const list = document.getElementById('phoneContactsList');
+  section.style.display = '';
+  list.innerHTML = contacts.map((c,i) => {
+    const name  = (c.name&&c.name[0])||'Без имени';
+    const phone = (c.tel&&c.tel[0])||'';
+    return `<div class="phone-contact-item">
+      <div class="phone-contact-ava">${name[0].toUpperCase()}</div>
+      <div class="phone-contact-info">
+        <div class="phone-contact-name">${esc(name)}</div>
+        <div class="phone-contact-phone">${esc(phone)}</div>
+      </div>
+      <button class="phone-invite-btn" id="invBtn${i}" onclick="invitePhoneContact('${esc(name)}','${esc(phone)}',${i})">Пригласить</button>
+    </div>`;
+  }).join('');
+}
+async function invitePhoneContact(name, phone, idx) {
+  const text = getInviteText();
+  if (navigator.share) {
+    try { await navigator.share({title:'Для своих',text,url:APP_URL}); }
+    catch(e) { if(e.name!=='AbortError') window.location.href=`sms:${phone}?body=${encodeURIComponent(text)}`; }
+  } else {
+    window.location.href = `sms:${phone}?body=${encodeURIComponent(text)}`;
+  }
+  const btn = document.getElementById('invBtn'+idx);
+  if(btn){btn.textContent='✓ Отправлено';btn.classList.add('sent');}
+}
 </script>
 
 <!-- PWA INSTALL BANNER -->
